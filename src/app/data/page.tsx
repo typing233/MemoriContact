@@ -10,46 +10,62 @@ export default function DataPage() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [emailReminder, setEmailReminder] = useState(false);
+  const [settingsLoading, setSettingsLoading] = useState(true);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
   }, [status, router]);
 
+  useEffect(() => {
+    if (!session) return;
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && typeof data.emailReminder === "boolean") {
+          setEmailReminder(data.emailReminder);
+        }
+        setSettingsLoading(false);
+      });
+  }, [session]);
+
+  const toggleEmailReminder = async () => {
+    const newVal = !emailReminder;
+    setEmailReminder(newVal);
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ emailReminder: newVal }),
+    });
+  };
+
   const handleExport = async (format: "json" | "csv") => {
     setExporting(true);
-    const res = await fetch("/api/data/export");
-    const data = await res.json();
 
-    let content: string;
-    let filename: string;
-    let mime: string;
-
-    if (format === "json") {
-      content = JSON.stringify(data, null, 2);
-      filename = `memoricontact-export-${new Date().toISOString().split("T")[0]}.json`;
-      mime = "application/json";
+    if (format === "csv") {
+      const res = await fetch("/api/data/export?format=csv");
+      const text = await res.text();
+      const blob = new Blob([text], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `memoricontact-export-${new Date().toISOString().split("T")[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
     } else {
-      const headers = ["name", "avatar", "notes", "contactFrequency", "tags"];
-      const rows = data.map((c: Record<string, unknown>) => [
-        csvEscape(String(c.name || "")),
-        csvEscape(String(c.avatar || "")),
-        csvEscape(String(c.notes || "")),
-        String(c.contactFrequency || ""),
-        csvEscape((c.tags as string[] || []).join(";")),
-      ].join(","));
-      content = [headers.join(","), ...rows].join("\n");
-      filename = `memoricontact-export-${new Date().toISOString().split("T")[0]}.csv`;
-      mime = "text/csv";
+      const res = await fetch("/api/data/export");
+      const data = await res.json();
+      const content = JSON.stringify(data, null, 2);
+      const blob = new Blob([content], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `memoricontact-export-${new Date().toISOString().split("T")[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
     }
 
-    const blob = new Blob([content], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
     setExporting(false);
   };
 
@@ -105,7 +121,7 @@ export default function DataPage() {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
         <h2 className="text-lg font-semibold mb-4">导入数据</h2>
         <p className="text-sm text-gray-600 mb-4">
-          支持 JSON 和 CSV 格式。JSON 格式与导出格式相同。CSV 格式需包含 name 列。
+          支持 JSON 和 CSV 格式。JSON 格式与导出格式相同。CSV 字段：name, avatar, notes, contactFrequency, tags（分号分隔）, customFields（格式 label:value 分号分隔）, importantDates（格式 label:date 分号分隔）, interactions（格式 type|date|location|note 分号分隔）。
           导入时会自动跳过已存在的同名联系人。
         </p>
         <input
@@ -136,13 +152,26 @@ export default function DataPage() {
           </div>
         )}
       </div>
+
+      {/* Email Reminder Settings */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold mb-4">提醒设置</h2>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-gray-900 font-medium">邮件摘要</p>
+            <p className="text-xs text-gray-500 mt-1">
+              开启后，系统会将每日提醒以邮件摘要形式发送到注册邮箱。关闭时仅发送应用内通知。
+            </p>
+          </div>
+          <button
+            onClick={toggleEmailReminder}
+            disabled={settingsLoading}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${emailReminder ? "bg-indigo-600" : "bg-gray-300"}`}
+          >
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${emailReminder ? "translate-x-6" : "translate-x-1"}`} />
+          </button>
+        </div>
+      </div>
     </div>
   );
-}
-
-function csvEscape(value: string): string {
-  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
 }

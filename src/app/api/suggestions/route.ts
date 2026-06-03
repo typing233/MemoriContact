@@ -18,12 +18,20 @@ export async function GET() {
   const suggestions = contacts
     .map((c) => {
       const lastInteraction = c.interactions[0]?.date;
-      const daysSinceContact = lastInteraction
-        ? Math.floor((now - new Date(lastInteraction).getTime()) / (1000 * 60 * 60 * 24))
-        : Infinity;
+      let daysSinceContact: number;
+      let neverInteracted = false;
+
+      if (lastInteraction) {
+        daysSinceContact = Math.floor((now - new Date(lastInteraction).getTime()) / (1000 * 60 * 60 * 24));
+      } else {
+        // Never interacted — use days since creation
+        daysSinceContact = Math.floor((now - new Date(c.createdAt).getTime()) / (1000 * 60 * 60 * 24));
+        neverInteracted = true;
+      }
+
       const frequency = c.contactFrequency || 30;
       const overdueDays = daysSinceContact - frequency;
-      return { ...c, daysSinceContact, frequency, overdueDays };
+      return { ...c, daysSinceContact, frequency, overdueDays, neverInteracted };
     })
     .filter((c) => c.overdueDays > 0)
     .sort((a, b) => b.overdueDays - a.overdueDays);

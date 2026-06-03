@@ -22,6 +22,7 @@ export async function GET(
       customFields: true,
       importantDates: true,
       interactions: { orderBy: { date: "desc" } },
+      reminders: { orderBy: { createdAt: "desc" } },
     },
   });
 

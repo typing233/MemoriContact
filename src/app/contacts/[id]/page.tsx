@@ -14,6 +14,15 @@ interface Interaction {
   location: string | null;
   date: string;
 }
+interface Reminder {
+  id: string;
+  type: string;
+  title: string;
+  message: string | null;
+  dueDate: string;
+  done: boolean;
+  createdAt: string;
+}
 interface Contact {
   id: string;
   name: string;
@@ -24,11 +33,12 @@ interface Contact {
   customFields: CustomField[];
   importantDates: ImportantDate[];
   interactions: Interaction[];
+  reminders: Reminder[];
 }
 
 interface TimelineItem {
   date: string;
-  type: "interaction" | "important_date";
+  type: "interaction" | "important_date" | "reminder";
   title: string;
   subtitle?: string;
   icon: string;
@@ -91,6 +101,16 @@ export default function ContactDetailPage() {
         title: d.label,
         subtitle: d.date,
         icon: "🎂",
+      });
+    }
+
+    for (const r of contact.reminders) {
+      items.push({
+        date: r.dueDate,
+        type: "reminder",
+        title: r.title,
+        subtitle: r.message || undefined,
+        icon: r.done ? "✅" : "🔔",
       });
     }
 
@@ -343,8 +363,8 @@ export default function ContactDetailPage() {
                             <div className="flex items-center gap-2">
                               <span className="font-medium text-sm text-gray-900">{item.title}</span>
                               <span className="text-xs text-gray-400">{new Date(item.date).toLocaleDateString("zh-CN")}</span>
-                              <span className={`text-xs px-1.5 py-0.5 rounded ${item.type === "important_date" ? "bg-pink-50 text-pink-600" : "bg-blue-50 text-blue-600"}`}>
-                                {item.type === "important_date" ? "日期" : "互动"}
+                              <span className={`text-xs px-1.5 py-0.5 rounded ${item.type === "important_date" ? "bg-pink-50 text-pink-600" : item.type === "reminder" ? "bg-amber-50 text-amber-600" : "bg-blue-50 text-blue-600"}`}>
+                                {item.type === "important_date" ? "日期" : item.type === "reminder" ? "提醒" : "互动"}
                               </span>
                             </div>
                             {item.subtitle && <p className="text-sm text-gray-500 mt-0.5 truncate">{item.subtitle}</p>}

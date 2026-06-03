@@ -13,34 +13,6 @@ interface ImportContact {
   interactions?: { type: string; note?: string; location?: string; date: string }[];
 }
 
-function parseCSV(text: string): ImportContact[] {
-  const lines = text.split("\n").filter((l) => l.trim());
-  if (lines.length < 2) return [];
-
-  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
-  const results: ImportContact[] = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseCsvLine(lines[i]);
-    const obj: Record<string, string> = {};
-    headers.forEach((h, idx) => { obj[h] = values[idx] || ""; });
-
-    const contact: ImportContact = { name: obj.name || obj["姓名"] || "" };
-    if (obj.avatar || obj["头像"]) contact.avatar = obj.avatar || obj["头像"];
-    if (obj.notes || obj["备注"]) contact.notes = obj.notes || obj["备注"];
-    if (obj.contactFrequency || obj["联系频率"]) {
-      const freq = parseInt(obj.contactFrequency || obj["联系频率"]);
-      if (!isNaN(freq) && freq > 0) contact.contactFrequency = freq;
-    }
-    if (obj.tags || obj["标签"]) {
-      contact.tags = (obj.tags || obj["标签"]).split(";").map((t) => t.trim()).filter(Boolean);
-    }
-    results.push(contact);
-  }
-
-  return results;
-}
-
 function parseCsvLine(line: string): string[] {
   const result: string[] = [];
   let current = "";
@@ -56,14 +28,92 @@ function parseCsvLine(line: string): string[] {
         inQuotes = !inQuotes;
       }
     } else if (ch === "," && !inQuotes) {
-      result.push(current.trim());
+      result.push(current);
       current = "";
     } else {
       current += ch;
     }
   }
-  result.push(current.trim());
+  result.push(current);
   return result;
+}
+
+function parseCSV(text: string): ImportContact[] {
+  const lines = text.split("\n").filter((l) => l.trim());
+  if (lines.length < 2) return [];
+
+  const headers = parseCsvLine(lines[0]).map((h) => h.trim().replace(/^"|"$/g, ""));
+  const results: ImportContact[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseCsvLine(lines[i]);
+    const obj: Record<string, string> = {};
+    headers.forEach((h, idx) => { obj[h] = (values[idx] || "").trim(); });
+
+    const name = obj.name || obj["姓名"] || "";
+    if (!name) continue;
+
+    const contact: ImportContact = { name };
+
+    if (obj.avatar || obj["头像"]) contact.avatar = obj.avatar || obj["头像"];
+    if (obj.notes || obj["备注"]) contact.notes = obj.notes || obj["备注"];
+
+    const freqStr = obj.contactFrequency || obj["联系频率"] || "";
+    if (freqStr) {
+      const freq = parseInt(freqStr);
+      if (!isNaN(freq) && freq > 0) contact.contactFrequency = freq;
+    }
+
+    const tagsStr = obj.tags || obj["标签"] || "";
+    if (tagsStr) {
+      contact.tags = tagsStr.split(";").map((t) => t.trim()).filter(Boolean);
+    }
+
+    // customFields format: "label1:value1;label2:value2"
+    const cfStr = obj.customFields || obj["自定义字段"] || "";
+    if (cfStr) {
+      contact.customFields = cfStr.split(";")
+        .map((pair) => {
+          const idx = pair.indexOf(":");
+          if (idx === -1) return null;
+          return { label: pair.slice(0, idx).trim(), value: pair.slice(idx + 1).trim() };
+        })
+        .filter((f): f is { label: string; value: string } => f !== null && f.label !== "" && f.value !== "");
+    }
+
+    // importantDates format: "label1:2000-01-01;label2:2005-06-15"
+    const idStr = obj.importantDates || obj["重要日期"] || "";
+    if (idStr) {
+      contact.importantDates = idStr.split(";")
+        .map((pair) => {
+          const idx = pair.indexOf(":");
+          if (idx === -1) return null;
+          return { label: pair.slice(0, idx).trim(), date: pair.slice(idx + 1).trim() };
+        })
+        .filter((d): d is { label: string; date: string } => d !== null && d.label !== "" && d.date !== "");
+    }
+
+    // interactions format: "type|date|location|note;type|date|location|note"
+    const intStr = obj.interactions || obj["互动记录"] || "";
+    if (intStr) {
+      contact.interactions = intStr.split(";")
+        .map((entry) => {
+          const parts = entry.split("|");
+          if (parts.length < 2 || !parts[0] || !parts[1]) return null;
+          return {
+            type: parts[0].trim(),
+            date: parts[1].trim(),
+            location: parts[2]?.trim() || undefined,
+            note: parts[3]?.trim() || undefined,
+          };
+        })
+        .filter((i): i is NonNullable<typeof i> => i !== null);
+    }
+
+    results.push(contact);
+  }
+
+  return results;
 }
 
 export async function POST(req: NextRequest) {

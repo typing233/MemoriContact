@@ -12,6 +12,7 @@ interface Suggestion {
   daysSinceContact: number;
   frequency: number;
   overdueDays: number;
+  neverInteracted: boolean;
   tags: { id: string; name: string }[];
 }
 
@@ -118,7 +119,7 @@ export default function DashboardPage() {
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-sm text-gray-900 truncate">{s.name}</div>
                     <div className="text-xs text-gray-500">
-                      已 {s.daysSinceContact === Infinity ? "从未互动" : `${s.daysSinceContact} 天`}未联系
+                      已 {s.neverInteracted ? "从未" : `${s.daysSinceContact} 天未`}联系
                       <span className="text-orange-500 ml-1">(超期 {s.overdueDays} 天)</span>
                     </div>
                   </div>
