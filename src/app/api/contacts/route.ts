@@ -1,16 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserId } from "@/lib/session";
-
-const contactSchema = z.object({
-  name: z.string().min(1, "姓名不能为空"),
-  avatar: z.string().optional(),
-  notes: z.string().optional(),
-  tags: z.array(z.string()).optional(),
-  customFields: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
-  importantDates: z.array(z.object({ label: z.string(), date: z.string() })).optional(),
-});
+import { createContactSchema, formatZodError } from "@/lib/validation";
 
 export async function GET(req: NextRequest) {
   const userId = await getCurrentUserId();
@@ -52,34 +43,32 @@ export async function POST(req: NextRequest) {
   const userId = await getCurrentUserId();
   if (!userId) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
+  let body;
   try {
-    const body = await req.json();
-    const parsed = contactSchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
-    }
-
-    const { name, avatar, notes, tags, customFields, importantDates } = parsed.data;
-
-    const contact = await prisma.contact.create({
-      data: {
-        userId,
-        name,
-        avatar: avatar || null,
-        notes: notes || null,
-        tags: tags?.length ? { create: tags.map((t) => ({ name: t })) } : undefined,
-        customFields: customFields?.length
-          ? { create: customFields }
-          : undefined,
-        importantDates: importantDates?.length
-          ? { create: importantDates }
-          : undefined,
-      },
-      include: { tags: true, customFields: true, importantDates: true },
-    });
-
-    return NextResponse.json(contact, { status: 201 });
+    body = await req.json();
   } catch {
-    return NextResponse.json({ error: "服务器错误" }, { status: 500 });
+    return NextResponse.json({ error: "请求体格式错误" }, { status: 400 });
   }
+
+  const parsed = createContactSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
+  }
+
+  const { name, avatar, notes, tags, customFields, importantDates } = parsed.data;
+
+  const contact = await prisma.contact.create({
+    data: {
+      userId,
+      name,
+      avatar: avatar || null,
+      notes: notes || null,
+      tags: tags?.length ? { create: tags.map((t) => ({ name: t })) } : undefined,
+      customFields: customFields?.length ? { create: customFields } : undefined,
+      importantDates: importantDates?.length ? { create: importantDates } : undefined,
+    },
+    include: { tags: true, customFields: true, importantDates: true },
+  });
+
+  return NextResponse.json(contact, { status: 201 });
 }

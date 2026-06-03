@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserId } from "@/lib/session";
-
-const updateSchema = z.object({
-  type: z.string().min(1).optional(),
-  note: z.string().optional(),
-  location: z.string().optional(),
-  date: z.string().optional(),
-});
+import { updateInteractionSchema, formatZodError } from "@/lib/validation";
 
 export async function PUT(
   req: NextRequest,
@@ -26,28 +19,30 @@ export async function PUT(
   });
   if (!interaction) return NextResponse.json({ error: "记录不存在" }, { status: 404 });
 
+  let body;
   try {
-    const body = await req.json();
-    const parsed = updateSchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
-    }
-
-    const { type, note, location, date } = parsed.data;
-    const updated = await prisma.interaction.update({
-      where: { id: interactionId },
-      data: {
-        ...(type !== undefined && { type }),
-        ...(note !== undefined && { note: note || null }),
-        ...(location !== undefined && { location: location || null }),
-        ...(date !== undefined && { date: new Date(date) }),
-      },
-    });
-
-    return NextResponse.json(updated);
+    body = await req.json();
   } catch {
-    return NextResponse.json({ error: "服务器错误" }, { status: 500 });
+    return NextResponse.json({ error: "请求体格式错误" }, { status: 400 });
   }
+
+  const parsed = updateInteractionSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
+  }
+
+  const { type, note, location, date } = parsed.data;
+  const updated = await prisma.interaction.update({
+    where: { id: interactionId },
+    data: {
+      ...(type !== undefined && { type }),
+      ...(note !== undefined && { note: note || null }),
+      ...(location !== undefined && { location: location || null }),
+      ...(date !== undefined && date && { date: new Date(date) }),
+    },
+  });
+
+  return NextResponse.json(updated);
 }
 
 export async function DELETE(

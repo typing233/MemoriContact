@@ -1,22 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserId } from "@/lib/session";
-
-const updateSchema = z.object({
-  name: z.string().min(1).optional(),
-  avatar: z.string().optional(),
-  notes: z.string().optional(),
-  tags: z.array(z.string()).optional(),
-  customFields: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
-  importantDates: z.array(z.object({ label: z.string(), date: z.string() })).optional(),
-});
+import { updateContactSchema, formatZodError } from "@/lib/validation";
 
 async function verifyOwnership(contactId: string, userId: string) {
-  const contact = await prisma.contact.findFirst({
-    where: { id: contactId, userId },
-  });
-  return contact;
+  return prisma.contact.findFirst({ where: { id: contactId, userId } });
 }
 
 export async function GET(
@@ -53,48 +41,50 @@ export async function PUT(
   const existing = await verifyOwnership(id, userId);
   if (!existing) return NextResponse.json({ error: "联系人不存在" }, { status: 404 });
 
+  let body;
   try {
-    const body = await req.json();
-    const parsed = updateSchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
-    }
-
-    const { name, avatar, notes, tags, customFields, importantDates } = parsed.data;
-
-    if (tags !== undefined) {
-      await prisma.tag.deleteMany({ where: { contactId: id } });
-    }
-    if (customFields !== undefined) {
-      await prisma.customField.deleteMany({ where: { contactId: id } });
-    }
-    if (importantDates !== undefined) {
-      await prisma.importantDate.deleteMany({ where: { contactId: id } });
-    }
-
-    const contact = await prisma.contact.update({
-      where: { id },
-      data: {
-        ...(name !== undefined && { name }),
-        ...(avatar !== undefined && { avatar: avatar || null }),
-        ...(notes !== undefined && { notes: notes || null }),
-        ...(tags !== undefined && {
-          tags: { create: tags.map((t) => ({ name: t })) },
-        }),
-        ...(customFields !== undefined && {
-          customFields: { create: customFields },
-        }),
-        ...(importantDates !== undefined && {
-          importantDates: { create: importantDates },
-        }),
-      },
-      include: { tags: true, customFields: true, importantDates: true, interactions: true },
-    });
-
-    return NextResponse.json(contact);
+    body = await req.json();
   } catch {
-    return NextResponse.json({ error: "服务器错误" }, { status: 500 });
+    return NextResponse.json({ error: "请求体格式错误" }, { status: 400 });
   }
+
+  const parsed = updateContactSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
+  }
+
+  const { name, avatar, notes, tags, customFields, importantDates } = parsed.data;
+
+  if (tags !== undefined) {
+    await prisma.tag.deleteMany({ where: { contactId: id } });
+  }
+  if (customFields !== undefined) {
+    await prisma.customField.deleteMany({ where: { contactId: id } });
+  }
+  if (importantDates !== undefined) {
+    await prisma.importantDate.deleteMany({ where: { contactId: id } });
+  }
+
+  const contact = await prisma.contact.update({
+    where: { id },
+    data: {
+      ...(name !== undefined && { name }),
+      ...(avatar !== undefined && { avatar: avatar || null }),
+      ...(notes !== undefined && { notes: notes || null }),
+      ...(tags !== undefined && {
+        tags: { create: tags.map((t) => ({ name: t })) },
+      }),
+      ...(customFields !== undefined && {
+        customFields: { create: customFields },
+      }),
+      ...(importantDates !== undefined && {
+        importantDates: { create: importantDates },
+      }),
+    },
+    include: { tags: true, customFields: true, importantDates: true, interactions: true },
+  });
+
+  return NextResponse.json(contact);
 }
 
 export async function DELETE(

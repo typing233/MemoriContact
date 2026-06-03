@@ -14,6 +14,9 @@ interface Contact {
   updatedAt: string;
 }
 
+interface FormCustomField { label: string; value: string }
+interface FormImportantDate { label: string; date: string }
+
 export default function ContactsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -21,8 +24,13 @@ export default function ContactsPage() {
   const [sort, setSort] = useState<"name" | "lastInteraction">("name");
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [formError, setFormError] = useState("");
+
   const [newName, setNewName] = useState("");
+  const [newAvatar, setNewAvatar] = useState("");
   const [newTags, setNewTags] = useState("");
+  const [newCustomFields, setNewCustomFields] = useState<FormCustomField[]>([{ label: "", value: "" }]);
+  const [newImportantDates, setNewImportantDates] = useState<FormImportantDate[]>([{ label: "", date: "" }]);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
@@ -41,26 +49,48 @@ export default function ContactsPage() {
     if (session) fetchContacts();
   }, [session, sort, fetchContacts]);
 
+  const resetForm = () => {
+    setNewName("");
+    setNewAvatar("");
+    setNewTags("");
+    setNewCustomFields([{ label: "", value: "" }]);
+    setNewImportantDates([{ label: "", date: "" }]);
+    setFormError("");
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim()) return;
+    setFormError("");
 
-    const tags = newTags
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean);
+    if (!newName.trim()) {
+      setFormError("姓名不能为空");
+      return;
+    }
+
+    const tags = newTags.split(",").map((t) => t.trim()).filter(Boolean);
+    const customFields = newCustomFields.filter((f) => f.label || f.value);
+    const importantDates = newImportantDates.filter((d) => d.label || d.date);
 
     const res = await fetch("/api/contacts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newName, tags }),
+      body: JSON.stringify({
+        name: newName,
+        avatar: newAvatar || undefined,
+        tags,
+        customFields: customFields.length > 0 ? customFields : undefined,
+        importantDates: importantDates.length > 0 ? importantDates : undefined,
+      }),
     });
 
     if (res.ok) {
-      setNewName("");
-      setNewTags("");
+      const created = await res.json();
+      resetForm();
       setShowForm(false);
-      fetchContacts();
+      router.push(`/contacts/${created.id}`);
+    } else {
+      const data = await res.json();
+      setFormError(data.error || "创建失败");
     }
   };
 
@@ -86,7 +116,7 @@ export default function ContactsPage() {
             <option value="lastInteraction">按最近互动排序</option>
           </select>
           <button
-            onClick={() => setShowForm(!showForm)}
+            onClick={() => { setShowForm(!showForm); if (!showForm) resetForm(); }}
             className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition whitespace-nowrap"
           >
             + 新建联系人
@@ -97,35 +127,122 @@ export default function ContactsPage() {
       {showForm && (
         <form
           onSubmit={handleCreate}
-          className="bg-white rounded-xl p-4 mb-6 shadow-sm border border-gray-200"
+          className="bg-white rounded-xl p-6 mb-6 shadow-sm border border-gray-200 space-y-4"
         >
+          <h2 className="text-lg font-semibold text-gray-900">新建联系人</h2>
+
+          {formError && (
+            <div className="bg-red-50 text-red-600 text-sm px-4 py-2 rounded-lg">
+              {formError}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="姓名 *"
-              required
-              className="px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">姓名 *</label>
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="联系人姓名"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">头像 URL</label>
+              <input
+                type="text"
+                value={newAvatar}
+                onChange={(e) => setNewAvatar(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="https://..."
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">标签（逗号分隔）</label>
             <input
               type="text"
               value={newTags}
               onChange={(e) => setNewTags(e.target.value)}
-              placeholder="标签（逗号分隔）"
-              className="px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="朋友, 同事, 家人"
             />
           </div>
-          <div className="flex gap-2 mt-3">
+
+          {/* Custom Fields */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">自定义字段</label>
+            {newCustomFields.map((f, i) => (
+              <div key={i} className="flex gap-2 mb-2">
+                <input
+                  placeholder="字段名"
+                  value={f.label}
+                  onChange={(e) => { const arr = [...newCustomFields]; arr[i] = { ...arr[i], label: e.target.value }; setNewCustomFields(arr); }}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
+                <input
+                  placeholder="值"
+                  value={f.value}
+                  onChange={(e) => { const arr = [...newCustomFields]; arr[i] = { ...arr[i], value: e.target.value }; setNewCustomFields(arr); }}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => { const arr = newCustomFields.filter((_, idx) => idx !== i); setNewCustomFields(arr.length ? arr : [{ label: "", value: "" }]); }}
+                  className="text-red-400 hover:text-red-600 text-sm px-2"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <button type="button" onClick={() => setNewCustomFields([...newCustomFields, { label: "", value: "" }])} className="text-indigo-600 text-sm hover:underline">
+              + 添加字段
+            </button>
+          </div>
+
+          {/* Important Dates */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">重要日期</label>
+            {newImportantDates.map((d, i) => (
+              <div key={i} className="flex gap-2 mb-2">
+                <input
+                  placeholder="标签（如生日）"
+                  value={d.label}
+                  onChange={(e) => { const arr = [...newImportantDates]; arr[i] = { ...arr[i], label: e.target.value }; setNewImportantDates(arr); }}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
+                <input
+                  type="date"
+                  value={d.date}
+                  onChange={(e) => { const arr = [...newImportantDates]; arr[i] = { ...arr[i], date: e.target.value }; setNewImportantDates(arr); }}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => { const arr = newImportantDates.filter((_, idx) => idx !== i); setNewImportantDates(arr.length ? arr : [{ label: "", date: "" }]); }}
+                  className="text-red-400 hover:text-red-600 text-sm px-2"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <button type="button" onClick={() => setNewImportantDates([...newImportantDates, { label: "", date: "" }])} className="text-indigo-600 text-sm hover:underline">
+              + 添加日期
+            </button>
+          </div>
+
+          <div className="flex gap-2 pt-2 border-t border-gray-100">
             <button
               type="submit"
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition"
+              className="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition"
             >
-              创建
+              创建联系人
             </button>
             <button
               type="button"
-              onClick={() => setShowForm(false)}
+              onClick={() => { setShowForm(false); resetForm(); }}
               className="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 transition"
             >
               取消
