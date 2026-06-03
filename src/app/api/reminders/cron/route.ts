@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { sendDigestEmail } from "@/lib/email";
+
+interface DigestEntry {
+  email: string;
+  userName: string;
+  items: { category: string; title: string; message: string }[];
+}
 
 async function runReminderCheck() {
   const now = new Date();
@@ -16,10 +23,10 @@ async function runReminderCheck() {
 
   let remindersCreated = 0;
   let notificationsCreated = 0;
-  const emailDigests: Map<string, { email: string; userName: string; items: string[] }> = new Map();
+  const emailDigests: Map<string, DigestEntry> = new Map();
 
   for (const contact of contacts) {
-    // --- Important dates check ---
+    // --- Important dates ---
     for (const importantDate of contact.importantDates) {
       const dateStr = importantDate.date;
       if (!dateStr) continue;
@@ -70,15 +77,19 @@ async function runReminderCheck() {
           notificationsCreated++;
 
           if (contact.user.emailReminder) {
-            const digest = emailDigests.get(contact.userId) || { email: contact.user.email, userName: contact.user.name, items: [] };
-            digest.items.push(`[重要日期] ${title} — ${message}`);
+            const digest = emailDigests.get(contact.userId) || {
+              email: contact.user.email,
+              userName: contact.user.name,
+              items: [],
+            };
+            digest.items.push({ category: "重要日期", title, message });
             emailDigests.set(contact.userId, digest);
           }
         }
       }
     }
 
-    // --- Overdue contact check (including never-interacted) ---
+    // --- Overdue contact (including never-interacted) ---
     if (contact.contactFrequency) {
       const lastInteraction = contact.interactions[0]?.date;
       let daysSince: number;
@@ -88,7 +99,6 @@ async function runReminderCheck() {
         daysSince = Math.floor((now.getTime() - new Date(lastInteraction).getTime()) / (1000 * 60 * 60 * 24));
         shouldRemind = daysSince >= contact.contactFrequency;
       } else {
-        // Never interacted — use days since contact creation
         daysSince = Math.floor((now.getTime() - new Date(contact.createdAt).getTime()) / (1000 * 60 * 60 * 24));
         shouldRemind = daysSince >= contact.contactFrequency;
       }
@@ -133,8 +143,12 @@ async function runReminderCheck() {
           notificationsCreated++;
 
           if (contact.user.emailReminder) {
-            const digest = emailDigests.get(contact.userId) || { email: contact.user.email, userName: contact.user.name, items: [] };
-            digest.items.push(`[联系提醒] ${title} — ${message}`);
+            const digest = emailDigests.get(contact.userId) || {
+              email: contact.user.email,
+              userName: contact.user.name,
+              items: [],
+            };
+            digest.items.push({ category: "联系提醒", title, message });
             emailDigests.set(contact.userId, digest);
           }
         }
@@ -142,15 +156,26 @@ async function runReminderCheck() {
     }
   }
 
-  // Send email digests (log-based; plug in real email provider here)
-  const emailsSent: string[] = [];
-  for (const [userId, digest] of emailDigests) {
-    if (digest.items.length > 0) {
-      // In production, replace with actual email sending (e.g. nodemailer, resend, etc.)
-      console.log(`[EMAIL DIGEST] To: ${digest.email} (${digest.userName})`);
-      console.log(`  Subject: MemoriContact 每日提醒摘要`);
-      console.log(`  Items:\n    ${digest.items.join("\n    ")}`);
-      emailsSent.push(userId);
+  // --- Send email digests ---
+  let emailsSent = 0;
+  let emailsFailed = 0;
+  const emailErrors: string[] = [];
+
+  for (const [, digest] of emailDigests) {
+    if (digest.items.length === 0) continue;
+
+    const result = await sendDigestEmail({
+      to: digest.email,
+      userName: digest.userName,
+      items: digest.items,
+      date: todayStr,
+    });
+
+    if (result.success) {
+      emailsSent++;
+    } else {
+      emailsFailed++;
+      emailErrors.push(`${digest.email}: ${result.error}`);
     }
   }
 
@@ -158,13 +183,12 @@ async function runReminderCheck() {
     message: "定时任务完成",
     remindersCreated,
     notificationsCreated,
-    emailDigestsSent: emailsSent.length,
+    emailDigests: { sent: emailsSent, failed: emailsFailed, errors: emailErrors },
     checkedAt: todayStr,
   };
 }
 
-// GET — designed for cron job schedulers (e.g. Vercel Cron, external scheduler)
-// Uses CRON_SECRET via query param or header
+// GET — for cron schedulers (Vercel Cron, external HTTP cron)
 export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET || "memoricontact-cron-key";
   const paramSecret = req.nextUrl.searchParams.get("secret");
@@ -178,7 +202,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(result);
 }
 
-// POST — manual trigger, same auth
+// POST — manual trigger
 export async function POST(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET || "memoricontact-cron-key";
   const authHeader = req.headers.get("authorization");
