@@ -53,7 +53,7 @@ export async function PUT(
     return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
   }
 
-  const { name, avatar, notes, tags, customFields, importantDates } = parsed.data;
+  const { name, avatar, notes, tags, customFields, importantDates, contactFrequency } = parsed.data;
 
   if (tags !== undefined) {
     await prisma.tag.deleteMany({ where: { contactId: id } });
@@ -71,6 +71,7 @@ export async function PUT(
       ...(name !== undefined && { name }),
       ...(avatar !== undefined && { avatar: avatar || null }),
       ...(notes !== undefined && { notes: notes || null }),
+      ...(contactFrequency !== undefined && { contactFrequency: contactFrequency }),
       ...(tags !== undefined && {
         tags: { create: tags.map((t) => ({ name: t })) },
       }),

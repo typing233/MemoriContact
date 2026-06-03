@@ -8,27 +8,31 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  password  String
-  createdAt DateTime @default(now())
-  contacts  Contact[]
+  id            String         @id @default(cuid())
+  email         String         @unique
+  name          String
+  password      String
+  emailReminder Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  contacts      Contact[]
+  notifications Notification[]
 }
 
 model Contact {
-  id             String          @id @default(cuid())
-  userId         String
-  name           String
-  avatar         String?
-  notes          String?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tags           Tag[]
-  customFields   CustomField[]
-  interactions   Interaction[]
-  importantDates ImportantDate[]
+  id               String          @id @default(cuid())
+  userId           String
+  name             String
+  avatar           String?
+  notes            String?
+  contactFrequency Int?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tags             Tag[]
+  customFields     CustomField[]
+  interactions     Interaction[]
+  importantDates   ImportantDate[]
+  reminders        Reminder[]
 
   @@index([userId])
 }
@@ -73,4 +77,32 @@ model ImportantDate {
   contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   @@index([contactId])
+}
+
+model Reminder {
+  id        String   @id @default(cuid())
+  type      String
+  title     String
+  message   String?
+  dueDate   DateTime
+  done      Boolean  @default(false)
+  contactId String
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([contactId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String?
+  read      Boolean  @default(false)
+  type      String
+  link      String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

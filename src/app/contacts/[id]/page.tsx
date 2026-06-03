@@ -2,7 +2,7 @@
 
 import { useSession } from "next-auth/react";
 import { useRouter, useParams } from "next/navigation";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 
 interface Tag { id: string; name: string }
 interface CustomField { id: string; label: string; value: string }
@@ -19,10 +19,19 @@ interface Contact {
   name: string;
   avatar: string | null;
   notes: string | null;
+  contactFrequency: number | null;
   tags: Tag[];
   customFields: CustomField[];
   importantDates: ImportantDate[];
   interactions: Interaction[];
+}
+
+interface TimelineItem {
+  date: string;
+  type: "interaction" | "important_date";
+  title: string;
+  subtitle?: string;
+  icon: string;
 }
 
 const INTERACTION_TYPES = ["通话", "见面", "礼物", "消息", "邮件", "其他"];
@@ -36,9 +45,10 @@ export default function ContactDetailPage() {
   const [contact, setContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ name: "", avatar: "", notes: "", tags: "", customFields: [] as { label: string; value: string }[], importantDates: [] as { label: string; date: string }[] });
+  const [editForm, setEditForm] = useState({ name: "", avatar: "", notes: "", tags: "", contactFrequency: "", customFields: [] as { label: string; value: string }[], importantDates: [] as { label: string; date: string }[] });
   const [showInteractionForm, setShowInteractionForm] = useState(false);
   const [interactionForm, setInteractionForm] = useState({ type: "通话", note: "", location: "", date: new Date().toISOString().split("T")[0] });
+  const [activeTab, setActiveTab] = useState<"timeline" | "interactions" | "stats">("timeline");
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
@@ -59,6 +69,51 @@ export default function ContactDetailPage() {
     if (session) fetchContact();
   }, [session, fetchContact]);
 
+  const timeline = useMemo((): TimelineItem[] => {
+    if (!contact) return [];
+    const items: TimelineItem[] = [];
+
+    for (const i of contact.interactions) {
+      const iconMap: Record<string, string> = { "通话": "📞", "见面": "🤝", "礼物": "🎁", "消息": "💬", "邮件": "📧", "其他": "📌" };
+      items.push({
+        date: i.date,
+        type: "interaction",
+        title: i.type,
+        subtitle: [i.location, i.note].filter(Boolean).join(" - "),
+        icon: iconMap[i.type] || "📌",
+      });
+    }
+
+    for (const d of contact.importantDates) {
+      items.push({
+        date: d.date + "T00:00:00.000Z",
+        type: "important_date",
+        title: d.label,
+        subtitle: d.date,
+        icon: "🎂",
+      });
+    }
+
+    items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return items;
+  }, [contact]);
+
+  const monthlyStats = useMemo(() => {
+    if (!contact) return {};
+    const stats: Record<string, number> = {};
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      stats[`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`] = 0;
+    }
+    for (const i of contact.interactions) {
+      const d = new Date(i.date);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      if (key in stats) stats[key]++;
+    }
+    return stats;
+  }, [contact]);
+
   const startEdit = () => {
     if (!contact) return;
     setEditForm({
@@ -66,6 +121,7 @@ export default function ContactDetailPage() {
       avatar: contact.avatar || "",
       notes: contact.notes || "",
       tags: contact.tags.map((t) => t.name).join(", "),
+      contactFrequency: contact.contactFrequency ? String(contact.contactFrequency) : "",
       customFields: contact.customFields.length > 0 ? contact.customFields.map((f) => ({ label: f.label, value: f.value })) : [{ label: "", value: "" }],
       importantDates: contact.importantDates.length > 0 ? contact.importantDates.map((d) => ({ label: d.label, date: d.date })) : [{ label: "", date: "" }],
     });
@@ -76,11 +132,12 @@ export default function ContactDetailPage() {
     const tags = editForm.tags.split(",").map((t) => t.trim()).filter(Boolean);
     const customFields = editForm.customFields.filter((f) => f.label && f.value);
     const importantDates = editForm.importantDates.filter((d) => d.label && d.date);
+    const freq = editForm.contactFrequency ? parseInt(editForm.contactFrequency) : null;
 
     const res = await fetch(`/api/contacts/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: editForm.name, avatar: editForm.avatar, notes: editForm.notes, tags, customFields, importantDates }),
+      body: JSON.stringify({ name: editForm.name, avatar: editForm.avatar, notes: editForm.notes, tags, customFields, importantDates, contactFrequency: freq }),
     });
 
     if (res.ok) {
@@ -121,6 +178,8 @@ export default function ContactDetailPage() {
 
   if (!contact) return null;
 
+  const maxMonthly = Math.max(...Object.values(monthlyStats), 1);
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
       <button onClick={() => router.push("/contacts")} className="text-indigo-600 text-sm mb-4 hover:underline">
@@ -140,9 +199,15 @@ export default function ContactDetailPage() {
               <input type="text" value={editForm.avatar} onChange={(e) => setEditForm({ ...editForm, avatar: e.target.value })} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" placeholder="https://..." />
             </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">标签（逗号分隔）</label>
-            <input type="text" value={editForm.tags} onChange={(e) => setEditForm({ ...editForm, tags: e.target.value })} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">标签（逗号分隔）</label>
+              <input type="text" value={editForm.tags} onChange={(e) => setEditForm({ ...editForm, tags: e.target.value })} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">互动频率（天）</label>
+              <input type="number" min="1" max="365" value={editForm.contactFrequency} onChange={(e) => setEditForm({ ...editForm, contactFrequency: e.target.value })} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" placeholder="如 30 表示每30天" />
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">备注</label>
@@ -196,6 +261,9 @@ export default function ContactDetailPage() {
                   </div>
                 )}
                 {contact.notes && <p className="text-gray-600 text-sm mt-2">{contact.notes}</p>}
+                {contact.contactFrequency && (
+                  <p className="text-xs text-gray-400 mt-1">互动频率: 每 {contact.contactFrequency} 天</p>
+                )}
               </div>
               <div className="flex gap-2 flex-shrink-0">
                 <button onClick={startEdit} className="text-indigo-600 text-sm font-medium hover:underline">编辑</button>
@@ -234,57 +302,159 @@ export default function ContactDetailPage() {
             </div>
           )}
 
-          {/* Interactions */}
+          {/* Tabs */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold">互动记录</h2>
-              <button onClick={() => setShowInteractionForm(!showInteractionForm)} className="text-indigo-600 text-sm font-medium hover:underline">
-                + 添加记录
+            <div className="flex items-center gap-4 border-b border-gray-200 mb-4">
+              <button
+                onClick={() => setActiveTab("timeline")}
+                className={`pb-2 text-sm font-medium border-b-2 transition ${activeTab === "timeline" ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+              >
+                时间线
+              </button>
+              <button
+                onClick={() => setActiveTab("interactions")}
+                className={`pb-2 text-sm font-medium border-b-2 transition ${activeTab === "interactions" ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+              >
+                互动记录
+              </button>
+              <button
+                onClick={() => setActiveTab("stats")}
+                className={`pb-2 text-sm font-medium border-b-2 transition ${activeTab === "stats" ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+              >
+                统计
               </button>
             </div>
 
-            {showInteractionForm && (
-              <form onSubmit={handleAddInteraction} className="border border-gray-200 rounded-xl p-4 mb-4 space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <select value={interactionForm.type} onChange={(e) => setInteractionForm({ ...interactionForm, type: e.target.value })} className="px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500">
-                    {INTERACTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                  <input type="date" value={interactionForm.date} onChange={(e) => setInteractionForm({ ...interactionForm, date: e.target.value })} className="px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" required />
-                </div>
-                <input type="text" placeholder="地点（可选）" value={interactionForm.location} onChange={(e) => setInteractionForm({ ...interactionForm, location: e.target.value })} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" />
-                <textarea placeholder="备注（可选）" value={interactionForm.note} onChange={(e) => setInteractionForm({ ...interactionForm, note: e.target.value })} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" rows={2} />
-                <div className="flex gap-2">
-                  <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition">添加</button>
-                  <button type="button" onClick={() => setShowInteractionForm(false)} className="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 transition">取消</button>
-                </div>
-              </form>
+            {/* Timeline Tab */}
+            {activeTab === "timeline" && (
+              <div className="space-y-0">
+                {timeline.length === 0 ? (
+                  <p className="text-gray-400 text-sm text-center py-4">暂无时间线数据</p>
+                ) : (
+                  <div className="relative">
+                    <div className="absolute left-4 top-0 bottom-0 w-px bg-gray-200" />
+                    <div className="space-y-4">
+                      {timeline.map((item, idx) => (
+                        <div key={idx} className="flex items-start gap-4 relative">
+                          <div className="w-8 h-8 rounded-full bg-white border-2 border-gray-200 flex items-center justify-center text-sm z-10 flex-shrink-0">
+                            {item.icon}
+                          </div>
+                          <div className="flex-1 min-w-0 pb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-sm text-gray-900">{item.title}</span>
+                              <span className="text-xs text-gray-400">{new Date(item.date).toLocaleDateString("zh-CN")}</span>
+                              <span className={`text-xs px-1.5 py-0.5 rounded ${item.type === "important_date" ? "bg-pink-50 text-pink-600" : "bg-blue-50 text-blue-600"}`}>
+                                {item.type === "important_date" ? "日期" : "互动"}
+                              </span>
+                            </div>
+                            {item.subtitle && <p className="text-sm text-gray-500 mt-0.5 truncate">{item.subtitle}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
 
-            {contact.interactions.length === 0 ? (
-              <p className="text-gray-400 text-sm py-4 text-center">暂无互动记录</p>
-            ) : (
-              <div className="space-y-3">
-                {contact.interactions.map((i) => (
-                  <div key={i.id} className="flex items-start gap-3 py-3 border-b border-gray-100 last:border-0">
-                    <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-sm flex-shrink-0">
-                      {i.type === "通话" && "📞"}
-                      {i.type === "见面" && "🤝"}
-                      {i.type === "礼物" && "🎁"}
-                      {i.type === "消息" && "💬"}
-                      {i.type === "邮件" && "📧"}
-                      {i.type === "其他" && "📌"}
+            {/* Interactions Tab */}
+            {activeTab === "interactions" && (
+              <div>
+                <div className="flex justify-end mb-4">
+                  <button onClick={() => setShowInteractionForm(!showInteractionForm)} className="text-indigo-600 text-sm font-medium hover:underline">
+                    + 添加记录
+                  </button>
+                </div>
+
+                {showInteractionForm && (
+                  <form onSubmit={handleAddInteraction} className="border border-gray-200 rounded-xl p-4 mb-4 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <select value={interactionForm.type} onChange={(e) => setInteractionForm({ ...interactionForm, type: e.target.value })} className="px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500">
+                        {INTERACTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                      <input type="date" value={interactionForm.date} onChange={(e) => setInteractionForm({ ...interactionForm, date: e.target.value })} className="px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" required />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm text-gray-900">{i.type}</span>
-                        <span className="text-xs text-gray-400">{new Date(i.date).toLocaleDateString("zh-CN")}</span>
+                    <input type="text" placeholder="地点（可选）" value={interactionForm.location} onChange={(e) => setInteractionForm({ ...interactionForm, location: e.target.value })} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" />
+                    <textarea placeholder="备注（可选）" value={interactionForm.note} onChange={(e) => setInteractionForm({ ...interactionForm, note: e.target.value })} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" rows={2} />
+                    <div className="flex gap-2">
+                      <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition">添加</button>
+                      <button type="button" onClick={() => setShowInteractionForm(false)} className="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 transition">取消</button>
+                    </div>
+                  </form>
+                )}
+
+                {contact.interactions.length === 0 ? (
+                  <p className="text-gray-400 text-sm py-4 text-center">暂无互动记录</p>
+                ) : (
+                  <div className="space-y-3">
+                    {contact.interactions.map((i) => (
+                      <div key={i.id} className="flex items-start gap-3 py-3 border-b border-gray-100 last:border-0">
+                        <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-sm flex-shrink-0">
+                          {i.type === "通话" && "📞"}
+                          {i.type === "见面" && "🤝"}
+                          {i.type === "礼物" && "🎁"}
+                          {i.type === "消息" && "💬"}
+                          {i.type === "邮件" && "📧"}
+                          {i.type === "其他" && "📌"}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-sm text-gray-900">{i.type}</span>
+                            <span className="text-xs text-gray-400">{new Date(i.date).toLocaleDateString("zh-CN")}</span>
+                          </div>
+                          {i.location && <p className="text-xs text-gray-500 mt-0.5">📍 {i.location}</p>}
+                          {i.note && <p className="text-sm text-gray-600 mt-1">{i.note}</p>}
+                        </div>
+                        <button onClick={() => handleDeleteInteraction(i.id)} className="text-red-400 text-xs hover:text-red-600 flex-shrink-0">删除</button>
                       </div>
-                      {i.location && <p className="text-xs text-gray-500 mt-0.5">📍 {i.location}</p>}
-                      {i.note && <p className="text-sm text-gray-600 mt-1">{i.note}</p>}
-                    </div>
-                    <button onClick={() => handleDeleteInteraction(i.id)} className="text-red-400 text-xs hover:text-red-600 flex-shrink-0">删除</button>
+                    ))}
                   </div>
-                ))}
+                )}
+              </div>
+            )}
+
+            {/* Stats Tab */}
+            {activeTab === "stats" && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-3">月度互动次数</h3>
+                  <div className="flex items-end gap-2 h-32">
+                    {Object.entries(monthlyStats).map(([month, count]) => (
+                      <div key={month} className="flex-1 flex flex-col items-center gap-1">
+                        <span className="text-xs text-gray-500">{count}</span>
+                        <div
+                          className="w-full bg-indigo-500 rounded-t"
+                          style={{ height: `${(count / maxMonthly) * 100}%`, minHeight: count > 0 ? "4px" : "0" }}
+                        />
+                        <span className="text-xs text-gray-400">{month.slice(5)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <div className="text-2xl font-bold text-indigo-600">{contact.interactions.length}</div>
+                    <div className="text-xs text-gray-500">总互动次数</div>
+                  </div>
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <div className="text-2xl font-bold text-indigo-600">
+                      {contact.interactions.length > 0
+                        ? new Date(contact.interactions[0].date).toLocaleDateString("zh-CN")
+                        : "-"
+                      }
+                    </div>
+                    <div className="text-xs text-gray-500">最近互动</div>
+                  </div>
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <div className="text-2xl font-bold text-indigo-600">
+                      {contact.interactions.length > 0
+                        ? Math.floor((Date.now() - new Date(contact.interactions[0].date).getTime()) / (1000 * 60 * 60 * 24))
+                        : "-"
+                      }
+                    </div>
+                    <div className="text-xs text-gray-500">天未联系</div>
+                  </div>
+                </div>
               </div>
             )}
           </div>

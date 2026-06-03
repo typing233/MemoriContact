@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 });
   }
 
-  const { name, avatar, notes, tags, customFields, importantDates } = parsed.data;
+  const { name, avatar, notes, tags, customFields, importantDates, contactFrequency } = parsed.data;
 
   const contact = await prisma.contact.create({
     data: {
@@ -63,6 +63,7 @@ export async function POST(req: NextRequest) {
       name,
       avatar: avatar || null,
       notes: notes || null,
+      contactFrequency: contactFrequency ?? null,
       tags: tags?.length ? { create: tags.map((t) => ({ name: t })) } : undefined,
       customFields: customFields?.length ? { create: customFields } : undefined,
       importantDates: importantDates?.length ? { create: importantDates } : undefined,

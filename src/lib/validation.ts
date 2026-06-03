@@ -29,6 +29,7 @@ export const createContactSchema = z.object({
   tags: z.array(trimmed.pipe(z.string().min(1, "标签不能为空字符串"))).optional(),
   customFields: z.array(customFieldSchema).optional(),
   importantDates: z.array(importantDateSchema).optional(),
+  contactFrequency: z.number().int().min(1).max(365).optional(),
 });
 
 export const updateContactSchema = z.object({
@@ -38,6 +39,7 @@ export const updateContactSchema = z.object({
   tags: z.array(trimmed.pipe(z.string().min(1, "标签不能为空字符串"))).optional(),
   customFields: z.array(customFieldSchema).optional(),
   importantDates: z.array(importantDateSchema).optional(),
+  contactFrequency: z.number().int().min(1).max(365).nullable().optional(),
 });
 
 export const createInteractionSchema = z.object({
